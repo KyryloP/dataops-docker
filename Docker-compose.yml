@@ -1,0 +1,14 @@
+version: "3.9"
+services:
+  front:
+    build: server\.
+    ports:
+      - "8000:8000"
+  secondary1:
+    build: secondary\.
+    ports:
+      - "8001:8000"
+  secondary2:
+    build: secondary\.
+    ports:
+      - "8002:8000"      
