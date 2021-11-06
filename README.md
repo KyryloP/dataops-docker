@@ -19,7 +19,7 @@
 - Метод:        POST
 - Endpoint:     http://localhost:8000/append
 - Content-type: application/json
-- Body:         {"text": "Your message here"}
+- Body:         {"text": "Your message here", "w": 3} 
 
 ##### Проверка сообщений на узлах:
 
