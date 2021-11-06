@@ -9,6 +9,7 @@ app = FastAPI()
 class Message(BaseModel):
     text: str
     id: int
+    w: int
 
 
 class Delay(BaseModel):

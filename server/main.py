@@ -10,10 +10,11 @@ app = FastAPI()
 class Message(BaseModel):
     text: str
     id: Optional[int] = 0
+    w: int
 
 
 messages = []       # list to store messages
-counter = 0         # initial lobal id for first message
+counter = 0         # initial global id
 nodes = ['http://secondary1:8000', 'http://secondary2:8000']
 
 # endpoint to check master node is alive
@@ -25,6 +26,11 @@ def read_root():
 @app.post("/append")
 def append_message(message: Message):
     global messages, counter
+
+    # validate w-parameter
+    if message.w > len(nodes) + 1:
+        return {"result": "error", "details": "Write concern parameter exeeds total nodes number"}
+
     counter += 1
     message.id = counter
 
@@ -48,9 +54,9 @@ def append_message(message: Message):
         th = threading.Thread(target=repFunc, args=(node, message,))
         th.start()
 
-    # waiting for replication for each node. Here we can implement Iteration 2 check for "w" parameter
+    # waiting for replication for each node
     while True:
-        if len(rep_results) == len(nodes):
+        if len(rep_results) >= message.w - 1:
             break
 
     messages.append(message)
