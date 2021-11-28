@@ -33,3 +33,17 @@
 - Endpoint:     http://{node_host_here}/setdelay
 - Content-type: application/json
 - Body:         {"delay": 5}
+
+##### Проверка здоровья нод:
+
+- Метод:        GET
+- Endpoint:     http://{node_host_here}/health
+
+##### Симуляция отключения нод
+Для отключения связи с мастером, можно использовать следующте команды (приведенные наименования нод могут отличаться):
+
+Отключение ноды (на примере 1) от сети 
+`docker network disconnect code_default code_secondary1_1`
+
+Подключение
+`docker network connect --allias secondary1 code_default code_secondary1_1`
