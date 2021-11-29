@@ -26,6 +26,7 @@ configs = {
 }
 
 last_id = 0  # variable to keep last ordered message id
+max_id = 0 # max_id
 
 # endpoint to check secondary node is alive
 @app.get("/")
@@ -35,7 +36,7 @@ def read_root():
 # endpoint for message replication
 @app.post("/replica")
 def save_message(message_list: MessageList):
-    global messages, configs, last_id
+    global messages, configs, last_id, max_id
 
     time.sleep(configs['delay'])
 
@@ -44,9 +45,13 @@ def save_message(message_list: MessageList):
             messages[m.id] = {"text": m.text,
                               "w": m.w}
 
+            # assigning max id
+            if m.id > max_id:
+                max_id = m.id
+
             # looking for continious ids
             if m.id > last_id:
-                for id in range(last_id + 1, m.id + 1):
+                for id in range(last_id + 1, max_id + 1):
                     if id in messages:
                         last_id = id
                     else:

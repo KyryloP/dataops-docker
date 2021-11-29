@@ -8,12 +8,31 @@ import json
 
 app = FastAPI()
 
-
 class Message(BaseModel):
     text: str
     id: Optional[int] = 0
     w: int
 
+class CountDownLatch(object):
+    def __init__(self, count=1):
+        self.count = count
+        self.lock = threading.Condition()
+
+    def count_down(self):
+        self.lock.acquire()
+        self.count -= 1
+        if self.count <= 0:
+            self.lock.notifyAll()
+        self.lock.release()
+
+    def to_wait(self):
+        self.lock.acquire()
+        while self.count > 0:
+            self.lock.wait()
+        self.lock.release()
+    
+    def __dict__(self):         
+        return self.count
 
 messages = {}       # dict to store messages
 counter = 0         # initial global id
@@ -30,7 +49,8 @@ for node in range(1, nodes_num+1):
                    'pings_error': 0,
                    'pings': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
                    'timeout': 1,
-                   'pending': []}
+                   'pending': [],
+                   'retry_latch': CountDownLatch(1)}
 
 
 # max batch size for retry attempts
@@ -59,7 +79,10 @@ def append_message(message: Message):
 
     messages[counter] = {"text": message.text,
                          "w": message.w,
-                         'states': dict(zip([n for n in range(1, nodes_num+1)], [0 for n in range(1, nodes_num+1)]))}
+                         'states': dict(zip([n for n in range(1, nodes_num+1)], [0 for n in range(1, nodes_num+1)])),
+                         'replicas': CountDownLatch(message.w)}
+    
+    messages[counter]['replicas'].count_down() # initial decrement for master node
 
     def repFunc(node, host, message):
 
@@ -69,21 +92,23 @@ def append_message(message: Message):
             result = request.json()
             if result['result'] == 'ok':
                 messages[counter]['states'][node] = 1
+                messages[counter]['replicas'].count_down()
             else:
                 nodes[node]['pending'].append(message)
+                nodes[node]['retry_latch'].count_down()  
         except:
             nodes[node]['pending'].append(message)
+            nodes[node]['retry_latch'].count_down()
 
+    
     # for each node the separate thread of replication is starting
     for node in nodes:
         th = threading.Thread(target=repFunc, args=(
             node, nodes[node]['host'], message,))
         th.start()
 
-    # waiting for replication for each node
-    while True: # I realize that it is awfull and I hope until defending my app I'll change it
-        if sum(messages[message.id]['states'].values()) >= message.w - 1:
-            break
+    # waiting for replication to w-1 node
+    messages[counter]['replicas'].to_wait()
 
     return {"result": "ok", "message_text": message.text, "id": message.id}
 
@@ -98,14 +123,22 @@ def list_messages():
 @app.get("/health")
 def health():
     global nodes
-    results = {"health": nodes}
+    
+    # filter some keys for displaying
+    results = {'health': {}}
+    for node in nodes:
+        results['health'][node] = {}
+        for k in nodes[node]:
+            if k not in ['host', 'retry_latch']:
+                results['health'][node][k] = nodes[node][k]
+
     return results
 
 
 def heartbeat(node):
     global nodes
 
-    while True: # Here i think it's appropriate, because heartbeats are supposed to work forever
+    while True: # Here i think it's appropriate - heartbeats are supposed to work forever
         
         # sleep for timeuot set
         time.sleep(nodes[node]['timeout'])
@@ -118,7 +151,7 @@ def heartbeat(node):
         except:
             pass
 
-        # writing results in moving ping history
+        # writing results in moving pings history
         nodes[node]['pings'].pop(-1)
         nodes[node]['pings'].insert(0, state)
 
@@ -140,7 +173,7 @@ def heartbeat(node):
 
         # conditional set of timeouts
         if errors <= 4:
-            nodes[node]['timeout'] = 5
+            nodes[node]['timeout'] = 2
         elif errors <= 8:
             nodes[node]['timeout'] = 10
         else:
@@ -158,7 +191,10 @@ def heartbeat(node):
 def retry(node, max_batch_size):
     global nodes, messages
 
-    while True: # I realize that it is awfull and I hope until defending my app I'll change it
+    while True: # It is NOT busy loop - CountDownLatch is used below
+
+        # waiting for start
+        nodes[node]['retry_latch'].to_wait()        
 
         # waiting timeouts set for node
         time.sleep(nodes[node]['timeout'])
@@ -177,12 +213,17 @@ def retry(node, max_batch_size):
                     # setting result for replication to message and node key
                     for m in batch:
                         messages[m.id]['states'][node] = 1
+                        messages[m.id]['replicas'].count_down() 
 
                     # remove batch from list (queue)
                     del nodes[node]['pending'][:batchsize]
 
             except:
                 pass
+        
+        # if we managed to resend all messages - lock to waiting
+        if len(nodes[node]['pending']) == 0:
+            nodes[node]['retry_latch']=CountDownLatch(1)
 
 
 # Threads for heartrbeats check
